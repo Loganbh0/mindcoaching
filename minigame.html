@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini Golf Game</title>
+    <link rel="stylesheet" href="mystyle.css">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column; /* Stack elements vertically */
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #e0f2e9; /* Light green background */
+            margin: 0;
+            font-family: 'Arial', sans-serif; /* Clean font */
+            color: #333;
+            overflow: hidden; /* Prevent scrollbars */
+        }
+
+        h1 {
+            margin-bottom: 0px;
+            color: #2e7d32; /* Darker green */
+        }
+
+        p#instructions {
+            margin-bottom: 15px;
+            color: #555;
+            text-align: center;
+            max-width: 700px;
+            line-height: 1.5;
+        }
+
+        canvas {
+            border: 5px solid #81c784; /* Green border */
+            background-color: #a5d6a7; /* Lighter green course */
+            display: block; /* Remove extra space below canvas */
+            max-width: 95%; /* Responsive width */
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2); /* Subtle shadow */
+            border-radius: 8px; /* Rounded corners */
+            cursor: crosshair; /* Indicate interaction area */
+        }
+
+        #ui {
+            margin-top: 15px;
+            font-size: 1.2em;
+            color: #1b5e20; /* Dark green text */
+            font-weight: bold;
+            display: flex;
+            gap: 30px; /* Space between UI elements */
+        }
+
+         #messageBox {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 80, 0, 0.85); /* Dark semi-transparent green */
+            color: #fff;
+            padding: 30px 40px;
+            border: 3px solid #fff;
+            border-radius: 10px;
+            font-size: 1.8em;
+            font-weight: bold;
+            text-align: center;
+            display: none; /* Hidden by default */
+            z-index: 10;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            cursor: pointer; /* Make it clear it's clickable */
+        }
+        #messageBox.show { /* Use a class to control display */
+             display: block;
+        }
+        
+    </style>
+</head>
+<body>
+
+    <div id="top">
+        <nav class="menu">
+          <ul>
+            <li><a href="index.html">Professional Page</a></li>
+            <li><a href="scratch.html">Scratch Page</a></li>
+          </ul>
+        </nav>
+</div>
+
+    <h1>Mini Golf Challenge</h1>
+    <p id="instructions">
+        Use <strong>Left/Right Arrows</strong> to aim.
+        Use <strong>Up/Down Arrows</strong> to adjust power.
+        Press <strong>Spacebar</strong> to shoot!
+    </p>
+
+    <canvas id="gameCanvas" width="800" height="500"></canvas>
+
+    <div id="ui">
+        <span id="strokes">Strokes: 0</span>
+        <span id="power">Power: 0%</span>
+    </div>
+
+     <div id="messageBox">You Win!</div>
+
+
+    <script>
+        // --- Canvas Setup ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- DOM Elements ---
+        const strokesUI = document.getElementById('strokes');
+        const powerUI = document.getElementById('power');
+        const messageBox = document.getElementById('messageBox');
+
+        // --- Game Constants ---
+        const FRICTION = 0.98; // How much the ball slows down each frame
+        const MIN_VELOCITY = 0.05; // Velocity below which the ball stops
+        const MAX_POWER = 15; // Maximum initial velocity magnitude
+        const BALL_RADIUS = 8;
+        const HOLE_RADIUS = 12;
+        const SAFE_ZONE_RADIUS = 75; // Min distance obstacles should be from start/hole
+
+        // --- Game State Variables ---
+        let ball = {
+            x: 100,
+            y: canvas.height / 2,
+            vx: 0,
+            vy: 0,
+            radius: BALL_RADIUS,
+            color: '#ffffff', // White ball
+            isMoving: false
+        };
+
+        let hole = {
+            x: canvas.width - 100,
+            y: canvas.height / 2,
+            radius: HOLE_RADIUS,
+            color: '#000000' // Black hole
+        };
+
+        // Obstacles will now be generated in resetGame
+        let obstacles = [];
+
+        let aimAngle = 0; // Angle in radians
+        let shotPower = 0; // Power level (0 to 1)
+        let strokes = 0;
+        let canShoot = true; // Can the player shoot? (Ball must be stopped)
+        let gameWon = false;
+
+        // --- Input Handling ---
+        const keys = {}; // Keep track of pressed keys
+
+        document.addEventListener('keydown', (e) => {
+            keys[e.code] = true;
+
+            // Shoot the ball
+            if (e.code === 'Space' && canShoot && !gameWon) {
+                shootBall();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
+
+        // Add click listener for the message box to play again
+        messageBox.addEventListener('click', () => {
+            if (gameWon) { // Only allow reset if game was won
+                resetGame();
+            }
+        });
+
+
+        // --- Game Functions ---
+
+        // Generate random obstacles
+        function generateObstacles() {
+            obstacles = []; // Clear existing obstacles
+            const numObstacles = 5; // Keep it simple with 2 obstacles (original code)... but I added 5
+            const minWidth = 50;
+            const maxWidth = 150;
+            const minHeight = 50;
+            const maxHeight = 150;
+            const edgeMargin = 20; // Min distance from canvas edge
+
+            for (let i = 0; i < numObstacles; i++) {
+                let obstacle;
+                let validPosition = false;
+                let attempts = 0; // Prevent infinite loops
+
+                while (!validPosition && attempts < 100) {
+                    attempts++;
+                    const width = Math.random() * (maxWidth - minWidth) + minWidth;
+                    const height = Math.random() * (maxHeight - minHeight) + minHeight;
+                    // Ensure obstacles are not too close to the edges
+                    const x = Math.random() * (canvas.width - width - edgeMargin * 2) + edgeMargin;
+                    const y = Math.random() * (canvas.height - height - edgeMargin * 2) + edgeMargin;
+
+                    obstacle = { x, y, width, height, color: '#8d6e63' }; // Brown wall
+
+                    // Check distance from ball start position
+                    const distToStart = Math.sqrt(Math.pow(obstacle.x + obstacle.width / 2 - ball.x, 2) + Math.pow(obstacle.y + obstacle.height / 2 - ball.y, 2));
+                    // Check distance from hole position
+                    const distToHole = Math.sqrt(Math.pow(obstacle.x + obstacle.width / 2 - hole.x, 2) + Math.pow(obstacle.y + obstacle.height / 2 - hole.y, 2));
+
+                    // Check if the obstacle bounding box overlaps the safe zones (simplified check)
+                    const startZoneOverlap = !(obstacle.x + obstacle.width < ball.x - SAFE_ZONE_RADIUS || obstacle.x > ball.x + SAFE_ZONE_RADIUS || obstacle.y + obstacle.height < ball.y - SAFE_ZONE_RADIUS || obstacle.y > ball.y + SAFE_ZONE_RADIUS);
+                    const holeZoneOverlap = !(obstacle.x + obstacle.width < hole.x - SAFE_ZONE_RADIUS || obstacle.x > hole.x + SAFE_ZONE_RADIUS || obstacle.y + obstacle.height < hole.y - SAFE_ZONE_RADIUS || obstacle.y > hole.y + SAFE_ZONE_RADIUS);
+
+
+                    if (!startZoneOverlap && !holeZoneOverlap) {
+                        // Basic check to avoid direct overlap with start/hole points themselves too
+                       if (!(ball.x > obstacle.x && ball.x < obstacle.x + obstacle.width && ball.y > obstacle.y && ball.y < obstacle.y + obstacle.height) &&
+                           !(hole.x > obstacle.x && hole.x < obstacle.x + obstacle.width && hole.y > obstacle.y && hole.y < obstacle.y + obstacle.height))
+                       {
+                            validPosition = true;
+                       }
+                    }
+                } // End while loop
+
+                if (validPosition) {
+                     obstacles.push(obstacle);
+                } else {
+                    console.warn("Could not place obstacle", i, "in a valid position after", attempts, "attempts.");
+                    // Optionally push a default obstacle or skip
+                }
+            }
+            console.log("Generated obstacles:", obstacles);
+        }
+
+
+        // Update aiming and power based on key presses
+        function handleInput() {
+            if (gameWon || !canShoot) return; // Don't handle input if ball moving or game over
+
+            // Aiming (Left/Right Arrows)
+            if (keys['ArrowLeft']) {
+                aimAngle -= 0.05; // Adjust angle speed as needed
+            }
+            if (keys['ArrowRight']) {
+                aimAngle += 0.05;
+            }
+
+            // Power (Up/Down Arrows)
+            if (keys['ArrowUp']) {
+                shotPower = Math.min(1, shotPower + 0.02); // Increase power up to 1 (100%)
+            }
+            if (keys['ArrowDown']) {
+                shotPower = Math.max(0, shotPower - 0.02); // Decrease power down to 0
+            }
+
+             // Keep angle within 0 to 2*PI range (optional, but good practice)
+             aimAngle = aimAngle % (Math.PI * 2);
+
+            // Update UI
+            powerUI.textContent = `Power: ${Math.round(shotPower * 100)}%`;
+        }
+
+        // Apply physics and update ball position
+        function updateBall() {
+            if (!ball.isMoving) return;
+
+            // Apply friction
+            ball.vx *= FRICTION;
+            ball.vy *= FRICTION;
+
+            // Stop the ball if velocity is very low
+            if (Math.abs(ball.vx) < MIN_VELOCITY && Math.abs(ball.vy) < MIN_VELOCITY) {
+                ball.vx = 0;
+                ball.vy = 0;
+                ball.isMoving = false;
+                canShoot = true; // Allow shooting again
+                console.log("Ball stopped.");
+                return; // Exit early if stopped
+            }
+
+            // Update position
+            let nextX = ball.x + ball.vx;
+            let nextY = ball.y + ball.vy;
+
+            // --- Collision Detection ---
+
+            // 1. Canvas Walls Collision
+            if (nextX + ball.radius > canvas.width || nextX - ball.radius < 0) {
+                ball.vx *= -0.8; // Reverse X velocity and lose some energy
+                nextX = ball.x + ball.vx; // Recalculate nextX to prevent sticking
+                 // Clamp position to prevent going out of bounds
+                if (nextX + ball.radius > canvas.width) nextX = canvas.width - ball.radius;
+                if (nextX - ball.radius < 0) nextX = 0 + ball.radius;
+            }
+            if (nextY + ball.radius > canvas.height || nextY - ball.radius < 0) {
+                ball.vy *= -0.8; // Reverse Y velocity and lose some energy
+                nextY = ball.y + ball.vy; // Recalculate nextY
+                 // Clamp position
+                 if (nextY + ball.radius > canvas.height) nextY = canvas.height - ball.radius;
+                 if (nextY - ball.radius < 0) nextY = 0 + ball.radius;
+            }
+
+             // 2. Obstacle Collision (Simple AABB check per obstacle)
+             obstacles.forEach(obstacle => {
+                // Check for potential collision on next frame
+                if (nextX + ball.radius > obstacle.x &&
+                    nextX - ball.radius < obstacle.x + obstacle.width &&
+                    nextY + ball.radius > obstacle.y &&
+                    nextY - ball.radius < obstacle.y + obstacle.height)
+                {
+                    // Collision occurred - determine bounce direction (Simplified)
+
+                    // Store position before potential bounce to check which side was hit
+                    const prevX = ball.x;
+                    const prevY = ball.y;
+
+                    // Determine penetration depths
+                    const penX1 = (obstacle.x + obstacle.width) - (nextX - ball.radius);
+                    const penX2 = (nextX + ball.radius) - obstacle.x;
+                    const penY1 = (obstacle.y + obstacle.height) - (nextY - ball.radius);
+                    const penY2 = (nextY + ball.radius) - obstacle.y;
+
+                    // Find minimum penetration
+                    const minPenX = Math.min(penX1, penX2);
+                    const minPenY = Math.min(penY1, penY2);
+
+                    // Bounce off the side with the minimum penetration
+                    if (minPenX < minPenY) {
+                        // Horizontal collision is primary
+                        ball.vx *= -0.8;
+                        // Adjust position slightly out of the obstacle horizontally
+                        nextX = (ball.vx > 0) ? obstacle.x + obstacle.width + ball.radius : obstacle.x - ball.radius;
+                        // Keep vertical velocity but recalculate nextY based on adjusted nextX if needed (usually minor)
+                        nextY = prevY + ball.vy; // Use previous Y + current vy
+                    } else {
+                        // Vertical collision is primary
+                        ball.vy *= -0.8;
+                        // Adjust position slightly out of the obstacle vertically
+                        nextY = (ball.vy > 0) ? obstacle.y + obstacle.height + ball.radius : obstacle.y - ball.radius;
+                         // Keep horizontal velocity but recalculate nextX
+                        nextX = prevX + ball.vx; // Use previous X + current vx
+                    }
+
+                    // Clamp position to prevent going out of bounds after bounce adjustment
+                    nextX = Math.max(ball.radius, Math.min(canvas.width - ball.radius, nextX));
+                    nextY = Math.max(ball.radius, Math.min(canvas.height - ball.radius, nextY));
+
+                }
+            });
+
+
+            // Update final position
+            ball.x = nextX;
+            ball.y = nextY;
+
+
+            // 3. Hole Collision (Check if ball center is inside hole)
+            const dx = ball.x - hole.x;
+            const dy = ball.y - hole.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            // Check if ball is overlapping the hole AND moving slow enough to fall in
+            if (distance < hole.radius && ball.isMoving && Math.abs(ball.vx) < 3 && Math.abs(ball.vy) < 3) {
+                winLevel();
+            }
+        }
+
+        // Function to handle shooting the ball
+        function shootBall() {
+            if (!canShoot || shotPower <= 0) return; // Can't shoot if already moving or power is 0
+
+            console.log(`Shooting: Angle=${aimAngle.toFixed(2)} rad, Power=${shotPower.toFixed(2)}`);
+
+            const initialVelocity = shotPower * MAX_POWER;
+            ball.vx = Math.cos(aimAngle) * initialVelocity;
+            ball.vy = Math.sin(aimAngle) * initialVelocity;
+
+            ball.isMoving = true;
+            canShoot = false; // Prevent shooting until ball stops
+            strokes++;
+            strokesUI.textContent = `Strokes: ${strokes}`;
+            shotPower = 0; // Reset power after shooting
+            powerUI.textContent = `Power: 0%`; // Update UI
+        }
+
+        // Function called when the ball goes into the hole
+        function winLevel() {
+            console.log(`Win! Strokes: ${strokes}`);
+            ball.isMoving = false;
+            ball.vx = 0;
+            ball.vy = 0;
+            // Center the ball visually in the hole
+            ball.x = hole.x;
+            ball.y = hole.y;
+            canShoot = false; // Don't allow shooting after winning
+            gameWon = true;
+
+            // Display win message and prompt to play again
+            let winText = (strokes === 1) ? `Hole in One!` : `You Win! (${strokes} Strokes)`;
+            messageBox.textContent = `${winText} Click here to Play Again!`;
+            messageBox.classList.add('show'); // Use class to show
+        }
+
+        // --- Drawing Functions ---
+
+        function drawBall() {
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = ball.color;
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        function drawHole() {
+            ctx.beginPath();
+            ctx.arc(hole.x, hole.y, hole.radius, 0, Math.PI * 2);
+            ctx.fillStyle = hole.color;
+            ctx.fill();
+            ctx.closePath();
+
+            // Add a small flag (optional visual)
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(hole.x, hole.y);
+            ctx.lineTo(hole.x, hole.y - 30); // Pole
+            ctx.stroke();
+            ctx.fillStyle = '#f44336'; // Red flag
+            ctx.beginPath();
+            ctx.moveTo(hole.x, hole.y - 30);
+            ctx.lineTo(hole.x + 15, hole.y - 25);
+            ctx.lineTo(hole.x, hole.y - 20);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function drawObstacles() {
+            obstacles.forEach(obstacle => {
+                ctx.fillStyle = obstacle.color;
+                ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+                 // Add a slight border for definition
+                 ctx.strokeStyle = '#5d4037'; // Darker brown border
+                 ctx.lineWidth = 1;
+                 ctx.strokeRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+            });
+        }
+
+        // Draw the aiming indicator line
+        function drawAimIndicator() {
+            if (canShoot && !gameWon) {
+                const lineLength = 30 + shotPower * 50; // Line length indicates power
+                const endX = ball.x + Math.cos(aimAngle) * lineLength;
+                const endY = ball.y + Math.sin(aimAngle) * lineLength;
+
+                ctx.beginPath();
+                ctx.moveTo(ball.x, ball.y);
+                ctx.lineTo(endX, endY);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)'; // Semi-transparent white line
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                ctx.closePath();
+
+                 // Draw arrowhead
+                 const arrowSize = 8;
+                 ctx.beginPath();
+                 ctx.moveTo(endX, endY);
+                 ctx.lineTo(endX - arrowSize * Math.cos(aimAngle - Math.PI / 6), endY - arrowSize * Math.sin(aimAngle - Math.PI / 6));
+                 ctx.moveTo(endX, endY);
+                 ctx.lineTo(endX - arrowSize * Math.cos(aimAngle + Math.PI / 6), endY - arrowSize * Math.sin(aimAngle + Math.PI / 6));
+                 ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+                 ctx.lineWidth = 3;
+                 ctx.stroke();
+                 ctx.closePath();
+            }
+        }
+
+        // --- Main Game Loop ---
+        function gameLoop() {
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Handle user input (aiming, power)
+            handleInput();
+
+            // Update ball physics and position
+            updateBall();
+
+            // Draw game elements
+            drawHole();
+            drawObstacles(); // Draw the potentially randomized obstacles
+            drawBall();
+            drawAimIndicator(); // Draw aim line if ball is stopped
+
+
+            // Request next frame
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Initialization ---
+        function resetGame() {
+             console.log("Resetting game...");
+             // Randomize obstacles FIRST
+             generateObstacles();
+
+             // Reset ball position and state
+             ball.x = 100; // Reset to starting position
+             ball.y = canvas.height / 2;
+             ball.vx = 0;
+             ball.vy = 0;
+             ball.isMoving = false;
+
+             // Reset game state variables
+             strokes = 0;
+             aimAngle = 0;
+             shotPower = 0;
+             canShoot = true;
+             gameWon = false;
+
+             // Update UI
+             strokesUI.textContent = `Strokes: ${strokes}`;
+             powerUI.textContent = `Power: ${Math.round(shotPower * 100)}%`;
+             messageBox.classList.remove('show'); // Hide message box using class
+
+             // No need to restart gameLoop if it's already running via requestAnimationFrame
+        }
+
+
+        // Start the game loop when the window loads
+        window.onload = () => {
+            console.log("Window loaded. Starting game loop.");
+            resetGame(); // Initialize game state (which now includes generating obstacles)
+            gameLoop(); // Start the main loop
+        };
+
+    </script>
+
+</body>
+</html>
